@@ -5,6 +5,7 @@ from datetime import datetime
 # --- Entry ---
 class EntryRequest(BaseModel):
     plate_number: str
+    map_id: str = "standard"
     entry_gate_id: Optional[str] = "GATE-01"
 
 class EntryResponse(BaseModel):

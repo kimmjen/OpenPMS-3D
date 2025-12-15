@@ -22,7 +22,15 @@
     -   미납 요금 존재 시 출차 거부 (Gate 미개방).
     -   정산 완료 시 출차 처리 및 이력 저장.
 
-### 3. Admin API (관리자 기능)
+### 3. Map Management (맵 관리) - NEW 🌟
+-   **DB-Driven Layouts**:
+    -   `MapConfig` 모델을 통해 주차장 레이아웃(좌표, 카메라, 경로)을 JSON 형태로 저장.
+    -   Multi-Map 지원: `Standard`, `Gangnam` 등 여러 맵 설정을 관리.
+-   **API**:
+    -   `GET /maps`: 활성화된 모든 맵 목록 조회.
+    -   `PUT /maps/{map_id}`: 맵 설정(이름, Capacity) 수정.
+
+### 4. Admin API (관리자 기능)
 -   **Real-time Monitoring**: 현재 주차된 모든 차량 상태 조회.
 -   **Control**:
     -   **강제 출차(Force Exit)**: 문제 차량 즉시 퇴거 처리.
@@ -53,7 +61,7 @@
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Initialize Database (Creates tables)
+# 2. Initialize Database (Creates tables & seeds map data)
 # Run this if pms.db does not exist or schema changed
 python reset_db.py
 
@@ -75,7 +83,7 @@ The server will start at `http://127.0.0.1:8000`.
 PMS-Core-Server/
 ├── app/
 │   ├── api/             # API Router & Endpoints
-│   │   ├── endpoints/   # parking.py, admin.py, vehicles.py
+│   │   ├── endpoints/   # parking.py, admin.py, vehicles.py, maps.py
 │   ├── core/            # Config & Settings
 │   ├── db/              # Database Session & Base Models
 │   ├── models/          # SQLAlchemy Models (DB Schema)
@@ -97,7 +105,14 @@ PMS-Core-Server/
 -   `unit_minutes`: 단위 시간 (분)
 -   `free_minutes`: 무료 회차 시간
 -   `max_daily_fee`: 일일 최대 요금
--   `capacity`: 주차장 총 수용량
+-   `capacity`: 주차장 총 수용량 (Global Default)
+
+### `MapConfig` (New)
+주차장 맵 설정을 정의합니다.
+-   `map_id`: 맵 식별자 (standard, gangnam 등)
+-   `name`: 맵 이름
+-   `capacity`: 해당 맵의 수용량
+-   `layout_config`: 3D 좌표 데이터 (JSON)
 
 ### `ParkingEvent`
 차량의 입출차 이력을 기록합니다.

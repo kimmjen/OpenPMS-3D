@@ -16,4 +16,5 @@ class ParkingEvent(Base):
     exit_time = Column(DateTime(timezone=True), nullable=True)
     
     parking_spot = Column(String, nullable=True) # e.g., "A-1"
+    map_id = Column(String, nullable=False, default="standard") # Linked map_id
     is_parked = Column(Boolean, default=True) # True: Parked, False: Exited

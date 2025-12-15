@@ -27,17 +27,17 @@ export default function Gate({ position, isOpen, label }: GateProps) {
 
   return (
     <group position={position}>
-      {/* Base */}
-      <mesh position={[0, 0.5, 0]}>
+      {/* Base - Offset to side */}
+      <mesh position={[-2.5, 0.5, 0]}>
         <boxGeometry args={[0.5, 1, 0.5]} />
         <meshStandardMaterial color="#FFD700" />
       </mesh>
-      
+
       {/* Pivot & Bar */}
-      <group ref={barRef} position={[0, 0.8, 0]}>
-         {/* Bar (Offset center to rotate from end) */}
+      <group ref={barRef} position={[-2.5, 0.8, 0]}>
+        {/* Bar (Offset center to rotate from end) */}
         <mesh position={[1.5, 0, 0]}>
-          <boxGeometry args={[3, 0.1, 0.1]} />
+          <boxGeometry args={[3.5, 0.1, 0.1]} />
           <meshStandardMaterial color="#FF4500" />
         </mesh>
       </group>

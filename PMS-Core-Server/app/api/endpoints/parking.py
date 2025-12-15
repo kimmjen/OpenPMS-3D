@@ -6,12 +6,14 @@ from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone
 import math
+from typing import List, Optional
+from pydantic import BaseModel
 
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.parking_event import ParkingEvent
 from app.models.vehicle import Vehicle
-from app.models.pricing_policy import PricingPolicy
+from app.models.map_config import MapConfig
 from app.models.transaction import Transaction
 from app.schemas.parking import (
     EntryRequest, EntryResponse,
@@ -56,18 +58,28 @@ async def get_or_create_vehicle(db: AsyncSession, plate_number: str) -> Vehicle:
     return vehicle
 
 async def calculate_parking_fee(db: AsyncSession, event: ParkingEvent) -> dict:
-    # 1. Get Policy
-    query = select(PricingPolicy).filter(PricingPolicy.is_active == True)
-    result = await db.execute(query)
-    policy = result.scalars().first()
+    # 1. Get Map Policy
+    # If map_id is missing (legacy), fallback to standard or global policy?
+    # New design: Pricing is in MapConfig
+    map_id = event.map_id or "standard"
     
-    if not policy:
-        # Default Fallback
-        policy = PricingPolicy(free_minutes=30, base_rate=1000, unit_minutes=60)
+    query = select(MapConfig).filter(MapConfig.map_id == map_id)
+    result = await db.execute(query)
+    map_config = result.scalars().first()
+    
+    if not map_config:
+        # Fallback to default hardcoded values if map config missing
+        base_rate = 1000.0
+        unit_minutes = 60
+        free_minutes = 30
+        max_daily_fee = 20000.0
+    else:
+        base_rate = map_config.base_rate
+        unit_minutes = map_config.unit_minutes
+        free_minutes = map_config.free_minutes
+        max_daily_fee = map_config.max_daily_fee
 
     now = datetime.now(timezone.utc)
-    # Ensure event.entry_time is timezone-aware. If stored as naive, assume UTC or local.
-    # SQLite often stores naive. 
     entry_time = event.entry_time
     if entry_time.tzinfo is None:
         entry_time = entry_time.replace(tzinfo=timezone.utc)
@@ -83,61 +95,78 @@ async def calculate_parking_fee(db: AsyncSession, event: ParkingEvent) -> dict:
         return {"fee": 0.0, "discount": 0.0, "duration": int(duration), "status": "VIP"}
 
     # Free time
-    if duration <= policy.free_minutes:
+    if duration <= free_minutes:
         return {"fee": 0.0, "discount": 0.0, "duration": int(duration), "status": "FREE_TIME"}
 
     # Advanced Calculation (Daily Cap)
-    # 1. Calculate Full Days Fee
     daily_minutes = 24 * 60
     days = int(duration // daily_minutes)
     remaining_minutes = duration % daily_minutes
 
-    daily_fee_total = days * policy.max_daily_fee
+    daily_fee_total = days * max_daily_fee
 
-    # 2. Calculate Remaining Time Fee
-    # Apply free time only to the first day or per session? 
-    # Usually free time is once per entry. So if days > 0, free time is already used.
-    # But let's keep logic simple: deduct free time from total duration first?
-    # Standard: (Days * Max) + Min(Calc(Remainder), Max)
-    
-    # If duration > free_minutes, we bill.
-    # Note: If days > 0, we assume free time logic is handled or negligible for long term.
-    # Let's apply standard logic:
-    
     if days > 0:
-        # For remaining minutes, calculate fee normally
-        units = math.ceil(remaining_minutes / policy.unit_minutes)
-        remainder_fee = units * policy.base_rate
-        remainder_fee = min(remainder_fee, policy.max_daily_fee)
+        units = math.ceil(remaining_minutes / unit_minutes)
+        remainder_fee = units * base_rate
+        remainder_fee = min(remainder_fee, max_daily_fee)
         
         fee = daily_fee_total + remainder_fee
     else:
-        # Less than 24 hours
-        billable_minutes = max(0, duration - policy.free_minutes)
-        units = math.ceil(billable_minutes / policy.unit_minutes)
-        fee = units * policy.base_rate
-        fee = min(fee, policy.max_daily_fee)
+        billable_minutes = max(0, duration - free_minutes)
+        units = math.ceil(billable_minutes / unit_minutes)
+        fee = units * base_rate
+        fee = min(fee, max_daily_fee)
     
     return {"fee": fee, "discount": discount, "duration": int(duration), "status": "PAYABLE"}
 
+class ActiveEvent(BaseModel):
+    plate_number: str
+    map_id: str
+    entry_time: datetime
 
+@router.get("/events/active", response_model=List[ActiveEvent])
+async def get_active_events(map_id: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+    query = select(ParkingEvent).filter(ParkingEvent.is_parked == True).options(selectinload(ParkingEvent.vehicle))
+    if map_id:
+        query = query.filter(ParkingEvent.map_id == map_id)
+        
+    result = await db.execute(query)
+    events = result.scalars().all()
+    
+    return [
+        ActiveEvent(
+            plate_number=e.vehicle.plate_number, 
+            map_id=e.map_id, 
+            entry_time=e.entry_time
+        ) for e in events
+    ]
 @router.post("/entry", response_model=EntryResponse)
 async def entry_vehicle(req: EntryRequest, db: AsyncSession = Depends(get_db)):
-    # 0. Check Capacity
-    count_query = select(func.count(ParkingEvent.id)).filter(ParkingEvent.is_parked == True)
+    # 0. Get Map Config & Check Capacity
+    map_query = select(MapConfig).filter(MapConfig.map_id == req.map_id)
+    map_res = await db.execute(map_query)
+    map_config = map_res.scalars().first()
+    
+    if not map_config:
+        raise HTTPException(status_code=404, detail=f"Map {req.map_id} not found")
+
+    count_query = select(func.count(ParkingEvent.id)).filter(
+        ParkingEvent.is_parked == True,
+        ParkingEvent.map_id == req.map_id # Filter by map!
+    )
     count_res = await db.execute(count_query)
     current_count = count_res.scalar() or 0
     
-    if current_count >= settings.MAX_CAPACITY:
+    if current_count >= map_config.capacity:
         return EntryResponse(
             event_id=0,
             plate_number=req.plate_number,
             entry_time=datetime.now(),
             gate_open=False,
-            message=f"FULL: {current_count}/{settings.MAX_CAPACITY}"
+            message=f"FULL: {current_count}/{map_config.capacity}"
         )
 
-    # 1. Check if already parked
+    # 1. Check if already parked (Global check or Per Map? Let's assume Global for now, car can't be in 2 places)
     existing_event = await get_active_event(db, req.plate_number)
     if existing_event:
         return EntryResponse(
@@ -152,7 +181,11 @@ async def entry_vehicle(req: EntryRequest, db: AsyncSession = Depends(get_db)):
     vehicle = await get_or_create_vehicle(db, req.plate_number)
     
     # 3. Create Event
-    new_event = ParkingEvent(vehicle_id=vehicle.id, parking_spot="TBD")
+    new_event = ParkingEvent(
+        vehicle_id=vehicle.id, 
+        parking_spot="TBD",
+        map_id=req.map_id # Store map_id
+    )
     db.add(new_event)
     await db.commit()
     await db.refresh(new_event)

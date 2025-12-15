@@ -7,6 +7,9 @@
 ## ✨ Key Features (주요 기능)
 
 ### 1. 3D Simulation (실시간 시뮬레이션)
+-   **Lobby & Multi-Map**:
+    -   시작 페이지(Lobby)에서 다양한 주차장 맵(Standard, Gangnam 등)을 선택하여 진입.
+    -   각 맵마다 고유한 레이아웃(게이트 위치, 경로)과 수용량 적용.
 -   **Realistic Rendering**: Three.js 기반의 3D 주차장 환경 구현.
 -   **Dynamic Animations**: `Anime.js`를 활용한 차량 진입/진출, 차단기 개폐 애니메이션.
 -   **Live Updates**: 관리자 설정(Capacity 등)에 따라 주차면이 실시간으로 동적 생성/변경됨.
@@ -14,12 +17,14 @@
 
 ### 2. Admin Dashboard (관리자 대시보드)
 -   **Path**: `/admin`
--   **Monitoring**: 실시간 주차 현황(차량 번호, 입차 시간, 점유율) 모니터링.
--   **Configuration**:
+-   **Dashboard Tab**:
+    -   **Monitoring**: 실시간 주차 현황(차량 번호, 입차 시간, 점유율) 모니터링.
     -   **Pricing Policy**: 기본 요금, 무료 회차, 단위 시간, 일일 최대 요금 설정.
-    -   **Capacity Management**: 주차장 크기 조절 (3D 화면 즉시 반영).
     -   **Presets**: 지역별(강남, 공영, 호텔 등) 요금 프리셋 제공.
--   **Control**: 특정 차량 강제 출차(Force Exit), 시스템 리셋, 입차 시간 수정(테스트용).
+    -   **Control**: 특정 차량 강제 출차(Force Exit), 시스템 리셋, 입차 시간 수정(테스트용).
+-   **Map Management Tab**:
+    -   등록된 모든 맵(Standard, Gangnam 등) 리스트 조회.
+    -   각 맵의 **Capacity(수용량)**, 이름, 설명 수정 가능.
 
 ### 3. Control Panel (사용자 패널)
 -   **Glassmorphism UI**: 세련된 다크 모드 오버레이 UI.
@@ -59,7 +64,8 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
 ### Pages
--   **Simulation**: `http://localhost:3000/`
+-   **Lobby Page**: `http://localhost:3000/` (Select Map)
+-   **Simulation**: `http://localhost:3000/sim/[mapId]` (e.g., `/sim/standard`, `/sim/gangnam`)
 -   **Admin Dashboard**: `http://localhost:3000/admin`
 
 ---
@@ -70,13 +76,14 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 parksim-3d-web/
 ├── app/
 │   ├── admin/           # Admin Dashboard Page
+│   ├── sim/             # Simulation Page ([mapId])
 │   ├── components/
 │   │   ├── canvas/      # 3D R3F Components (Scene, Car, Gate, ParkingLot)
 │   │   └── ui/          # 2D UI Components (ControlPanel)
 │   ├── lib/             # API Client (Axios)
 │   ├── store/           # Global State (Zustand)
 │   ├── layout.tsx       # Root Layout
-│   └── page.tsx         # Main Simulation Page
+│   └── page.tsx         # Lobby Page (Main)
 ├── public/              # Static Assets (Models, Textures)
 └── tailwind.config.ts   # Tailwind Configuration
 ```

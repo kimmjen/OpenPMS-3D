@@ -2,6 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
+# Enhance model registry
+import app.db.base  # noqa: F401
+
 from app.core.config import settings
 from app.api.api import api_router
 from app.db.session import AsyncSessionLocal

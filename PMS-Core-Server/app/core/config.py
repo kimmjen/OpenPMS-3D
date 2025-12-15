@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     # Database
     # Default to SQLite for ease of initial development, can be overridden by env vars for Postgres
-    DATABASE_URL: str = "sqlite+aiosqlite:///./pms.db"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:12341234@localhost:5432/pms"
 
     # Parking Lot Configuration
     MAX_CAPACITY: int = 5  # Total parking spots available
