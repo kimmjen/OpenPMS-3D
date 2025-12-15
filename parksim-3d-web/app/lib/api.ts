@@ -92,6 +92,12 @@ export const adminApi = {
     updateEntryTime: async (eventId: number, newTime: string) => {
         const res = await api.patch(`/admin/event/${eventId}/entry-time?entry_time=${newTime}`);
         return res.data;
+    },
+    getHistory: async (mapId?: string, limit: number = 50) => {
+        const params: any = { limit };
+        if (mapId && mapId !== 'all') params.map_id = mapId;
+        const res = await api.get('/admin/history', { params });
+        return res.data;
     }
 };
 

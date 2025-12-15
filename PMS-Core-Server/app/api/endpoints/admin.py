@@ -3,7 +3,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import delete
+from sqlalchemy import delete, desc
 
 from app.db.session import get_db
 from app.models.parking_event import ParkingEvent
@@ -112,4 +112,41 @@ async def update_entry_time(event_id: int, entry_time: str, db: AsyncSession = D
     event.entry_time = new_time
     await db.commit()
     await db.refresh(event)
+    event.entry_time = new_time
+    await db.commit()
+    await db.refresh(event)
     return {"message": "Entry time updated", "new_time": event.entry_time}
+
+@router.get("/history", response_model=List[dict])
+async def get_transaction_history(
+    map_id: str = None, 
+    limit: int = 50, 
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Fetch payment transaction history.
+    Optional filter by map_id.
+    """
+    query = select(Transaction).join(ParkingEvent).options(
+        selectinload(Transaction.event).selectinload(ParkingEvent.vehicle)
+    ).order_by(desc(Transaction.transaction_time)).limit(limit)
+
+    if map_id:
+        query = query.filter(ParkingEvent.map_id == map_id)
+        
+    result = await db.execute(query)
+    transactions = result.scalars().all()
+    
+    history = []
+    for tx in transactions:
+        history.append({
+            "id": tx.id,
+            "date": tx.transaction_time,
+            "plate_number": tx.event.vehicle.plate_number if tx.event and tx.event.vehicle else "Unknown",
+            "map_id": tx.event.map_id if tx.event else "Unknown",
+            "fee_paid": tx.fee_paid,
+            "method": tx.payment_method,
+            "is_paid": tx.is_paid
+        })
+        
+    return history

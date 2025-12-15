@@ -61,17 +61,17 @@ To share the database schema and data as a `.sql` file, use `pg_dump` via Docker
 
 ### Command (명령어)
 ```bash
-# Export Structure + Data (구조 + 데이터)
-docker exec -t pms-postgres pg_dump -U user pms_db > pms_dump.sql
-
-# Export Structure Only (구조만)
-docker exec -t pms-postgres pg_dump -U user -s pms_db > pms_schema.sql
+# Export to sql folder (SQL 폴더로 추출)
+docker exec -t pms-postgres pg_dump -U postgres pms_db > PMS-Core-Server/sql/pms_dump.sql
 ```
 
 ### Importing .SQL (SQL 복원)
+We provide a snapshot of the Mega Scale database in `PMS-Core-Server/sql/pms_dump.sql`.
+`PMS-Core-Server/sql/pms_dump.sql` 경로에 초대형 스케일 DB 스냅샷을 제공합니다.
+
 ```bash
-# Restore from file
-cat pms_dump.sql | docker exec -i pms-postgres psql -U user -d pms_db
+# Restore from provided file (제공된 파일로 복원)
+cat PMS-Core-Server/sql/pms_dump.sql | docker exec -i pms-postgres psql -U postgres -d pms_db
 ```
 
 ---
