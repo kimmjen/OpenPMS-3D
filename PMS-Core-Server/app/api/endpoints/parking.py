@@ -59,14 +59,14 @@ async def get_or_create_vehicle(db: AsyncSession, plate_number: str) -> Vehicle:
 
 async def calculate_parking_fee(db: AsyncSession, event: ParkingEvent) -> dict:
     # 1. Get Map Policy
-    # If map_id is missing (legacy), fallback to standard or global policy?
-    # New design: Pricing is in MapConfig
     map_id = event.map_id or "standard"
     
     query = select(MapConfig).filter(MapConfig.map_id == map_id)
     result = await db.execute(query)
     map_config = result.scalars().first()
     
+    # Critical: If specifically "mall", and map_config is missing, 
+    # there might be a sync issue. 
     if not map_config:
         # Fallback to default hardcoded values if map config missing
         base_rate = 1000.0

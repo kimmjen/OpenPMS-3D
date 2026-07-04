@@ -1,229 +1,270 @@
-"use client";
-
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { Group } from "three";
 import { useParkingStore, CarInstance } from "@/app/store";
+import { RoundedBox, Text, Html } from "@react-three/drei";
 import anime from "animejs";
+import { getEntryWaypoints, getExitWaypoints, getExitDepartWaypoints, animateAlongPath } from "@/app/lib/paths";
 
 interface CarProps {
-  data: CarInstance;
+    data: CarInstance;
 }
 
 export default function Car({ data }: CarProps) {
-  const groupRef = useRef<Group>(null);
-  const hasRequestedEntry = useRef(false);
-  const hasRequestedExit = useRef(false);
+    const groupRef = useRef<Group>(null);
+    const hasRequestedEntry = useRef(false);
+    const hasRequestedExit = useRef(false);
+    const cleanupRef = useRef<(() => void) | null>(null);
+    const [hovered, setHovered] = useState(false);
 
-  const {
-    setEntryGate, setExitGate, addLog,
-    requestEntry, requestExitProcess,
-    updateCarStatus, removeCar,
-    parkingSpots,
-    mapConfig
-  } = useParkingStore();
+    const {
+        setEntryGate, setExitGate,
+        requestEntry, requestExitProcess,
+        updateCarStatus, removeCar,
+        parkingSpots,
+        mapConfig
+    } = useParkingStore();
 
-  useEffect(() => {
-    if (!groupRef.current) return;
+    useEffect(() => {
+        if (!groupRef.current) return;
 
-    // Initial Position
-    if (data.status === 'PARKED' && data.parkingSpotIndex !== undefined) {
-      const spot = parkingSpots[data.parkingSpotIndex];
-      if (spot) groupRef.current.position.set(spot[0], spot[1], spot[2]);
-    } else {
-      groupRef.current.position.set(data.position[0], data.position[1], data.position[2]);
-    }
-  }, []);
-
-  // Handle Status Changes
-  useEffect(() => {
-    if (!groupRef.current || !mapConfig) return;
-
-    const paths = mapConfig.misc_config.paths;
-
-    if (data.status === 'ENTERING') {
-      if (hasRequestedEntry.current) return;
-      hasRequestedEntry.current = true;
-
-      addLog(`[${data.plateNumber}] Approaching entry...`);
-
-      // 1. Move to Entry Gate (Approaching)
-      // paths.entry_gate is [x, y, z]
-      // We want to stop slightly before the gate? Or exactly at?
-      // Let's assume paths.entry_gate is where the gate bar is.
-      // We stop a bit before.
-
-      const gatePos = paths.entry_gate;
-
-      anime({
-        targets: groupRef.current.position,
-        x: gatePos[0],
-        z: gatePos[2] + 4, // Stop 4 units before gate (assuming entry is from +Z)
-        duration: 1500,
-        easing: 'easeOutQuad',
-        complete: async () => {
-          if (!groupRef.current) return;
-
-          const success = await requestEntry(data.plateNumber);
-
-          if (!groupRef.current) return;
-
-          if (success) {
-            // 2. Pass Gate & Move to Spot (Complex Logic)
-            anime({
-              targets: groupRef.current.position,
-              x: gatePos[0],
-              z: gatePos[2] - 4, // Move past gate
-              duration: 1000,
-              delay: 500,
-              easing: 'linear',
-              complete: () => {
-                if (!groupRef.current) return;
-                setEntryGate(false);
-
-                // 3. Park into Spot (Path Logic)
-                const spotIndex = data.parkingSpotIndex ?? 0;
-                const spot = parkingSpots[spotIndex];
-
-                if (spot) {
-                  // Check if we need complex path (Mall / Multi-level)
-                  const isMall = mapConfig.map_id === 'mall';
-                  const targetY = spot[1];
-                  let waypoints: { x: number, y: number, z: number }[] = [];
-
-                  if (isMall && targetY < 0) {
-                    // Ramp Logic: Go to center shaft to descend
-                    // 1. Move to Ramp Entrance (e.g., Z=10, X=0) on Ground (y=0)
-                    waypoints.push({ x: 0, y: 0, z: 10 });
-                    // 2. Spiral/Drop to Target Level (x=0, y=Target, z=10)
-                    waypoints.push({ x: 0, y: targetY, z: 10 });
-                    // 3. Move to Spot Level (x=Spot.x, y=Target, z=Spot.z)
-                    waypoints.push({ x: spot[0], y: spot[1], z: spot[2] });
-                  } else {
-                    // Direct
-                    waypoints.push({ x: spot[0], y: spot[1], z: spot[2] });
-                  }
-
-                  // Recursive Move Function
-                  const moveStep = (index: number) => {
-                    if (index >= waypoints.length) {
-                      updateCarStatus(data.id, 'PARKED');
-                      addLog(`[${data.plateNumber}] Parked at Spot #${spotIndex + 1}`);
-                      return;
-                    }
-                    const pt = waypoints[index];
-                    anime({
-                      targets: groupRef.current!.position,
-                      x: pt.x,
-                      y: pt.y,
-                      z: pt.z,
-                      duration: 1500,
-                      easing: 'easeInOutQuad',
-                      complete: () => moveStep(index + 1)
-                    });
-                  };
-
-                  moveStep(0);
-                }
-              }
-            });
-          } else {
-            addLog(`[${data.plateNumber}] Access Denied. Leaving...`);
-            removeCar(data.id);
-          }
+        if (data.status === 'PARKED' && data.parkingSpotIndex !== undefined) {
+            const spot = parkingSpots[data.parkingSpotIndex];
+            if (spot) groupRef.current.position.set(spot[0], spot[1], spot[2]);
+        } else {
+            groupRef.current.position.set(data.position[0], data.position[1], data.position[2]);
         }
-      });
-    } else if (data.status === 'EXITING') {
-      if (hasRequestedExit.current) return;
-      hasRequestedExit.current = true;
+    }, []);
 
-      addLog(`[${data.plateNumber}] Leaving spot...`);
+    useEffect(() => {
+        return () => { cleanupRef.current?.(); };
+    }, []);
 
-      const gatePos = paths.exit_gate;
-      const exitEnd = paths.exit_end;
+    useEffect(() => {
+        if (!groupRef.current || !mapConfig) return;
 
-      // 1. Move to Exit Lane (Align with Exit Gate X)
-      // First move Z to "Lane" (e.g. Z=0 or middle) if needed, then X.
-      // For simplicity, move direct to front of exit gate.
+        if (data.status === 'ENTERING') {
+            if (hasRequestedEntry.current) return;
+            hasRequestedEntry.current = true;
 
-      anime({
-        targets: groupRef.current.position,
-        x: gatePos[0], // Align X with exit gate
-        z: gatePos[2] - 4, // Stop before gate (from inside)
-        duration: 2000,
-        easing: 'easeInOutQuad',
-        complete: () => {
-          if (!groupRef.current) return;
+            const spotIndex = data.parkingSpotIndex ?? 0;
+            const spot = parkingSpots[spotIndex];
+            if (!spot) return;
 
-          // 2. Wait at Gate (Payment Check)
-          anime({
-            targets: groupRef.current.position,
-            // Small wiggle or wait
-            z: gatePos[2] - 3,
-            duration: 1000,
-            easing: 'easeOutQuad',
-            complete: async () => {
-              if (!groupRef.current) return;
+            const waypoints = getEntryWaypoints(mapConfig, spot);
+            // First 2 waypoints: approach gate, then request entry
+            const approachWaypoints = waypoints.slice(0, 1);
+            const pastGateWaypoints = waypoints.slice(1);
 
-              const success = await requestExitProcess(data.plateNumber);
-
-              if (!groupRef.current) return;
-
-              if (success) {
-                // 3. Pass Exit Gate and Leave
-                anime({
-                  targets: groupRef.current.position,
-                  x: exitEnd[0],
-                  z: exitEnd[2], // Move to end of map
-                  duration: 2000, // Slower exit
-                  delay: 2000, // Wait for gate
-                  easing: 'linear',
-                  complete: () => {
+            cleanupRef.current = animateAlongPath(
+                groupRef.current,
+                approachWaypoints,
+                async () => {
                     if (!groupRef.current) return;
-                    setExitGate(false);
-                    removeCar(data.id);
-                    addLog(`[${data.plateNumber}] Session Ended.`);
-                  }
-                });
-              } else {
-                addLog(`[${data.plateNumber}] Exit Denied. Stuck at gate.`);
-              }
-            }
-          })
+                    const success = await requestEntry(data.plateNumber);
+                    if (!groupRef.current) return;
+
+                    if (success) {
+                        cleanupRef.current = animateAlongPath(
+                            groupRef.current,
+                            pastGateWaypoints,
+                            () => {
+                                setEntryGate(false);
+                                updateCarStatus(data.id, 'PARKED');
+                            },
+                            anime
+                        );
+                    } else {
+                        removeCar(data.id);
+                    }
+                },
+                anime
+            );
+        } else if (data.status === 'EXITING') {
+            if (hasRequestedExit.current) return;
+            hasRequestedExit.current = true;
+
+            const spotIndex = data.parkingSpotIndex ?? 0;
+            const spot = parkingSpots[spotIndex] || data.position;
+
+            const exitWaypoints = getExitWaypoints(mapConfig, spot);
+            const departWaypoints = getExitDepartWaypoints(mapConfig);
+
+            cleanupRef.current = animateAlongPath(
+                groupRef.current,
+                exitWaypoints,
+                async () => {
+                    if (!groupRef.current) return;
+                    const success = await requestExitProcess(data.plateNumber);
+                    if (!groupRef.current) return;
+
+                    if (success) {
+                        cleanupRef.current = animateAlongPath(
+                            groupRef.current,
+                            departWaypoints,
+                            () => {
+                                setExitGate(false);
+                                removeCar(data.id);
+                            },
+                            anime
+                        );
+                    }
+                },
+                anime
+            );
         }
-      });
-    }
+    }, [data.status, mapConfig]);
 
-  }, [data.status, mapConfig]);
+    const bodyColor = data.color || "#3b82f6";
+    const statusColors: Record<string, string> = {
+        ENTERING: '#3b82f6',
+        PARKED: '#22c55e',
+        EXITING: '#f59e0b',
+        IDLE: '#6b7280',
+    };
+    const indicatorColor = statusColors[data.status] || '#6b7280';
+    const emissiveVal = hovered ? '#ffffff' : '#000000';
+    const emissiveIntensity = hovered ? 0.12 : 0;
 
-  return (
-    <group ref={groupRef}>
-      {/* Car Body */}
-      <mesh position={[0, 0.5, 0]}>
-        <boxGeometry args={[1.8, 0.8, 4]} />
-        <meshStandardMaterial color={data.status === 'PARKED' ? "#10b981" : "#3b82f6"} roughness={0.5} metalness={0.5} />
-      </mesh>
-      {/* Roof */}
-      <mesh position={[0, 1.2, -0.5]}>
-        <boxGeometry args={[1.6, 0.6, 2.5]} />
-        <meshStandardMaterial color={data.status === 'PARKED' ? "#6ee7b7" : "#93c5fd"} />
-      </mesh>
-      {/* Wheels */}
-      <mesh position={[0.9, 0.3, 1.2]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.3, 0.3, 0.2]} />
-        <meshStandardMaterial color="black" />
-      </mesh>
-      <mesh position={[-0.9, 0.3, 1.2]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.3, 0.3, 0.2]} />
-        <meshStandardMaterial color="black" />
-      </mesh>
-      <mesh position={[0.9, 0.3, -1.2]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.3, 0.3, 0.2]} />
-        <meshStandardMaterial color="black" />
-      </mesh>
-      <mesh position={[-0.9, 0.3, -1.2]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.3, 0.3, 0.2]} />
-        <meshStandardMaterial color="black" />
-      </mesh>
-    </group>
-  );
+    return (
+        <group
+            ref={groupRef}
+            onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer'; }}
+            onPointerOut={() => { setHovered(false); document.body.style.cursor = 'auto'; }}
+        >
+            {/* Lower body */}
+            <RoundedBox args={[1.9, 0.5, 4.2]} radius={0.15} smoothness={4} position={[0, 0.35, 0]} castShadow>
+                <meshStandardMaterial color={bodyColor} roughness={0.3} metalness={0.4} emissive={emissiveVal} emissiveIntensity={emissiveIntensity} />
+            </RoundedBox>
+
+            {/* Upper cabin */}
+            <RoundedBox args={[1.6, 0.5, 2.2]} radius={0.12} smoothness={4} position={[0, 0.85, -0.3]} castShadow>
+                <meshStandardMaterial color={bodyColor} roughness={0.25} metalness={0.45} emissive={emissiveVal} emissiveIntensity={emissiveIntensity} />
+            </RoundedBox>
+
+            {/* Hood slope */}
+            <mesh position={[0, 0.68, 0.85]} rotation={[-0.3, 0, 0]} castShadow>
+                <boxGeometry args={[1.5, 0.08, 0.9]} />
+                <meshStandardMaterial color={bodyColor} roughness={0.3} metalness={0.4} />
+            </mesh>
+
+            {/* Rear slope */}
+            <mesh position={[0, 0.68, -1.5]} rotation={[0.35, 0, 0]} castShadow>
+                <boxGeometry args={[1.5, 0.08, 0.6]} />
+                <meshStandardMaterial color={bodyColor} roughness={0.3} metalness={0.4} />
+            </mesh>
+
+            {/* Front windshield */}
+            <mesh position={[0, 0.85, 0.72]} rotation={[0.45, 0, 0]}>
+                <boxGeometry args={[1.35, 0.5, 0.06]} />
+                <meshPhysicalMaterial color="#88ccff" transmission={0.4} roughness={0} metalness={0.1} transparent opacity={0.55} />
+            </mesh>
+
+            {/* Rear windshield */}
+            <mesh position={[0, 0.85, -1.38]} rotation={[-0.4, 0, 0]}>
+                <boxGeometry args={[1.35, 0.45, 0.06]} />
+                <meshPhysicalMaterial color="#88ccff" transmission={0.4} roughness={0} metalness={0.1} transparent opacity={0.55} />
+            </mesh>
+
+            {/* Side windows left */}
+            <mesh position={[0.82, 0.88, -0.3]}>
+                <boxGeometry args={[0.06, 0.35, 1.8]} />
+                <meshPhysicalMaterial color="#88ccff" transmission={0.4} roughness={0} metalness={0.1} transparent opacity={0.45} />
+            </mesh>
+
+            {/* Side windows right */}
+            <mesh position={[-0.82, 0.88, -0.3]}>
+                <boxGeometry args={[0.06, 0.35, 1.8]} />
+                <meshPhysicalMaterial color="#88ccff" transmission={0.4} roughness={0} metalness={0.1} transparent opacity={0.45} />
+            </mesh>
+
+            {/* Headlights */}
+            <mesh position={[0.65, 0.4, 2.06]}>
+                <boxGeometry args={[0.35, 0.15, 0.06]} />
+                <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={0.8} />
+            </mesh>
+            <mesh position={[-0.65, 0.4, 2.06]}>
+                <boxGeometry args={[0.35, 0.15, 0.06]} />
+                <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={0.8} />
+            </mesh>
+
+            {/* Taillights */}
+            <mesh position={[0.7, 0.4, -2.06]}>
+                <boxGeometry args={[0.3, 0.12, 0.06]} />
+                <meshStandardMaterial color="#ff0000" emissive="#ff0000" emissiveIntensity={0.6} />
+            </mesh>
+            <mesh position={[-0.7, 0.4, -2.06]}>
+                <boxGeometry args={[0.3, 0.12, 0.06]} />
+                <meshStandardMaterial color="#ff0000" emissive="#ff0000" emissiveIntensity={0.6} />
+            </mesh>
+
+            {/* Wheels */}
+            {[
+                [0.9, 0.22, 1.3], [-0.9, 0.22, 1.3],
+                [0.9, 0.22, -1.3], [-0.9, 0.22, -1.3]
+            ].map((pos, i) => (
+                <group key={i} position={pos as [number, number, number]}>
+                    {/* Tire */}
+                    <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
+                        <cylinderGeometry args={[0.28, 0.28, 0.22, 20]} />
+                        <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
+                    </mesh>
+                    {/* Hubcap */}
+                    <mesh rotation={[0, 0, Math.PI / 2]}>
+                        <cylinderGeometry args={[0.17, 0.17, 0.24, 16]} />
+                        <meshStandardMaterial color="#c0c0c0" metalness={0.8} roughness={0.2} />
+                    </mesh>
+                </group>
+            ))}
+
+            {/* Bumper front */}
+            <mesh position={[0, 0.2, 2.05]}>
+                <boxGeometry args={[1.7, 0.2, 0.12]} />
+                <meshStandardMaterial color="#333333" roughness={0.6} />
+            </mesh>
+
+            {/* Bumper rear */}
+            <mesh position={[0, 0.2, -2.05]}>
+                <boxGeometry args={[1.7, 0.2, 0.12]} />
+                <meshStandardMaterial color="#333333" roughness={0.6} />
+            </mesh>
+
+            {/* License plate rear */}
+            <group position={[0, 0.35, -2.12]}>
+                <mesh>
+                    <boxGeometry args={[0.75, 0.22, 0.02]} />
+                    <meshStandardMaterial color="#ffffff" />
+                </mesh>
+                <Text
+                    position={[0, 0, 0.02]}
+                    fontSize={0.1}
+                    color="#000000"
+                    anchorX="center"
+                    anchorY="middle"
+                    maxWidth={0.7}
+                >
+                    {data.plateNumber}
+                </Text>
+            </group>
+
+            {/* Status indicator on roof */}
+            <mesh position={[0, 1.12, -0.3]} rotation={[-Math.PI / 2, 0, 0]}>
+                <ringGeometry args={[0.12, 0.2, 16]} />
+                <meshBasicMaterial color={indicatorColor} />
+            </mesh>
+            <mesh position={[0, 1.13, -0.3]} rotation={[-Math.PI / 2, 0, 0]}>
+                <circleGeometry args={[0.1, 16]} />
+                <meshBasicMaterial color={indicatorColor} transparent opacity={0.8} />
+            </mesh>
+
+            {/* Hover tooltip */}
+            {hovered && (
+                <Html position={[0, 2.0, 0]} center distanceFactor={15}>
+                    <div className="bg-black/85 text-white px-3 py-2 rounded-lg text-sm whitespace-nowrap pointer-events-none shadow-lg border border-white/10">
+                        <div className="font-bold text-base">{data.plateNumber}</div>
+                        <div className="text-xs text-gray-300 mt-0.5">{data.status}</div>
+                    </div>
+                </Html>
+            )}
+        </group>
+    );
 }

@@ -2,9 +2,19 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { parkingApi, adminApi, mapApi, MapConfig } from '@/app/lib/api';
 
+const CAR_COLORS = [
+    '#f5f5f5', '#1a1a1a', '#c0c0c0', '#dc2626', '#2563eb',
+    '#1e3a5f', '#166534', '#d4a574', '#eab308', '#ea580c'
+];
+
+function randomCarColor() {
+    return CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)];
+}
+
 export interface CarInstance {
     id: string;
     plateNumber: string;
+    color: string;
     status: 'ENTERING' | 'PARKED' | 'EXITING' | 'IDLE';
     position: [number, number, number];
     parkingSpotIndex?: number; // Assigned spot index
@@ -106,6 +116,7 @@ export const useParkingStore = create<ParkingStore>()(
                                 recoveredCars.push({
                                     id: `recovered-${event.plate_number}`,
                                     plateNumber: event.plate_number,
+                                    color: randomCarColor(),
                                     status: 'PARKED',
                                     position: [spot[0], spot[1], spot[2]],
                                     parkingSpotIndex: freeIndex
@@ -185,6 +196,7 @@ export const useParkingStore = create<ParkingStore>()(
                 const newCar: CarInstance = {
                     id: Math.random().toString(36).substr(2, 9),
                     plateNumber: targetPlate,
+                    color: randomCarColor(),
                     status: 'ENTERING',
                     position: [startPos[0], startPos[1], startPos[2]],
                     parkingSpotIndex: spotIndex
